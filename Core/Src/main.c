@@ -2,6 +2,7 @@
 /**
   ******************************************************************************
   * @file           : main.c
+  * @brief          : Final_Sistemas_Control
   * @brief          : Main program body
   ******************************************************************************
   * @attention
@@ -26,7 +27,49 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+typedef enum{
+    START,
+    HEADER_1,
+    HEADER_2,
+    HEADER_3,
+    NBYTES,
+    TOKEN,
+    PAYLOAD
+}_eProtocolo;
 
+_eProtocolo estadoProtocolo;
+
+typedef enum{
+       ACK=0x0D,
+       ALIVE=0xF0,
+//       IR_SENSOR=0xA0,
+       OTHERS
+   }_eID;
+
+typedef struct{
+    uint8_t timeOut;         //!< TiemOut para reiniciar la máquina si se interrumpe la comunicación
+    uint8_t indexStart; 	 ///////////////////// AGREGAR ///////////////////////////////////
+    uint8_t cheksumRx;       //!< Cheksumm RX
+    uint8_t cheksumtx;       //!< Cheksumm Tx
+    uint8_t indexWriteRx;    //!< Indice de escritura del buffer circular de recepción
+    uint8_t indexReadRx;     //!< Indice de lectura del buffer circular de recepción
+    uint8_t indexWriteTx;    //!< Indice de escritura del buffer circular de transmisión
+    uint8_t indexReadTx;     //!< Indice de lectura del buffer circular de transmisión
+    uint8_t bufferRx[256];   //!< Buffer circular de recepción
+    uint8_t bufferTx[256];   //!< Buffer circular de transmisión
+    // uint8_t payload[32];     //!< Buffer para el Payload de datos recibidos
+}_sDato ;
+
+_sDato datosComProtocol;
+
+typedef union {
+    int32_t i32;
+    uint32_t ui32;
+    uint16_t ui16[2];
+    uint8_t ui8[4];
+}_udat;
+
+_udat myWord;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -42,6 +85,10 @@
 /* Private variables ---------------------------------------------------------*/
 TIM_HandleTypeDef htim1;
 
+UART_HandleTypeDef huart1;
+
+PCD_HandleTypeDef hpcd_USB_FS;
+
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
@@ -50,13 +97,203 @@ TIM_HandleTypeDef htim1;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_TIM1_Init(void);
+static void MX_USART1_UART_Init(void);
+static void MX_USB_PCD_Init(void);
 /* USER CODE BEGIN PFP */
+void onDataRx(void);
+void decodeProtocol(_sDato *);
+void decodeData(_sDato *);
+void encodeData(uint8_t id);
+void sendData(void);
 
+void USBReceive(uint8_t *but, uint16_t len);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void USBReceive(uint8_t *buf, uint16_t len){
+	for (int i = 0; i < len; ++i) {
+		datosComProtocol.bufferRx[datosComProtocol.indexWriteRx] = buf[i];
+	}
+}
 
+void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim1){
+		if(htim1->Instance == TIM1){
+			uint32_t captured_value = HAL_TIM_ReadCapturedValue(htim1, TIM_CHANNEL_1);
+		}
+}
+
+/*'<' header
+//byte1
+//byte2
+//byte3
+//byte4
+//checksum = suma de todos los bytes transmitidos
+//'>' tail
+
+//  4      1      1    1    N     1
+//HEADER NBYTES TOKEN ID PAYLOAD CKS
+
+//HEADER 4 bytes
+//'U' 'N' 'E' 'R'
+
+//NBYTES = ID+PAYLOAD+CKS = 2 + nbytes de payload
+
+//TOKEN: ':'
+
+//CKS: xor de todos los bytes enviados menos el CKS
+*/
+void decodeProtocol(_sDato *datosCom){
+	static uint8_t nBytes = 0;
+	while (datosCom->indexReadRx != datosCom->indexWriteRx){
+		switch (estadoProtocolo){
+		case START:
+			if (datosCom->bufferRx[datosCom->indexReadRx++]=='U') {
+				estadoProtocolo = HEADER_1;
+				datosCom->cheksumRx = 0;
+			}
+			break;
+		case HEADER_1:
+			if (datosCom->bufferRx[datosCom->indexReadRx++]=='N')
+			   {
+				   estadoProtocolo=HEADER_2;
+			   }
+			else{
+				datosCom->indexReadRx--;
+				estadoProtocolo=START;
+			}
+			break;
+		case HEADER_2:
+			if (datosCom->bufferRx[datosCom->indexReadRx++]=='E')
+			{
+				estadoProtocolo=HEADER_3;
+			}
+			else{
+				datosCom->indexReadRx--;
+			   estadoProtocolo=START;
+			}
+			break;
+		case HEADER_3:
+			if (datosCom->bufferRx[datosCom->indexReadRx++]=='R')
+				{
+					estadoProtocolo=NBYTES;
+				}
+			else{
+				datosCom->indexReadRx--;
+			   estadoProtocolo=START;
+			}
+			break;
+		case NBYTES:
+			datosCom->indexStart=datosCom->indexReadRx;
+			nBytes=datosCom->bufferRx[datosCom->indexReadRx++];
+			estadoProtocolo=TOKEN;
+			break;
+		case TOKEN:
+			if (datosCom->bufferRx[datosCom->indexReadRx++]==':'){
+			   estadoProtocolo=PAYLOAD;
+				datosCom->cheksumRx ='U'^'N'^'E'^'R'^ nBytes^':';
+				// datosCom->payload[0]=nBytes;
+				// indice=1;
+			}
+			else{
+				datosCom->indexReadRx--;
+				estadoProtocolo=START;
+			}
+			break;
+		case PAYLOAD:
+			if (nBytes>1){
+				// datosCom->payload[indice++]=datosCom->bufferRx[datosCom->indexReadRx];
+				datosCom->cheksumRx ^= datosCom->bufferRx[datosCom->indexReadRx++];
+			}
+			nBytes--;
+			if(nBytes<=0){
+				estadoProtocolo=START;
+				if(datosCom->cheksumRx == datosCom->bufferRx[datosCom->indexReadRx]){
+					decodeData(datosCom);
+				}
+			}
+			break;
+		default:
+			estadoProtocolo=START;
+			break;
+		}
+	}
+}
+
+void decodeData(_sDato *datosCom){
+	#define POSID   2
+    #define POSDATA 3
+
+	switch (datosCom->bufferRx[(datosCom->indexStart+POSID)]) {
+		case ALIVE:
+			encodeData(ALIVE);
+			break;
+//		case MOTOR_ACTION:
+//			datosCom->indexStart++;
+//			myWord.ui8[0] = datosCom->bufferRx[datosCom->indexStart++];
+//			myWord.ui8[1] = datosCom->bufferRx[datosCom->indexStart++];
+//			motor.canal1 = (uint16_t)myWord.ui32;
+//
+//			myWord.ui8[0] = datosCom->bufferRx[datosCom->indexStart++];
+//			myWord.ui8[1] = datosCom->bufferRx[datosCom->indexStart++];
+//			motor.canal2 = (uint16_t)myWord.ui32;
+//
+//			myWord.ui8[0] = datosCom->bufferRx[datosCom->indexStart++];
+//			myWord.ui8[1] = datosCom->bufferRx[datosCom->indexStart++];
+//			motor.canal3 = (uint16_t)myWord.ui32;
+//
+//			myWord.ui8[0] = datosCom->bufferRx[datosCom->indexStart++];
+//			myWord.ui8[1] = datosCom->bufferRx[datosCom->indexStart++];
+//			motor.canal4 = (uint16_t)myWord.ui32;
+//
+//			encodeData(MOTOR_ACTION);
+//			break;
+
+		default:
+//			auxBuffTx[indiceAux++]=0xDD;
+//			auxBuffTx[NBYTES]=0x02;
+			break;
+	}
+}
+
+void encodeData(uint8_t id){
+	uint8_t auxBuffTx[50], indiceAux=0, cheksum;
+	auxBuffTx[indiceAux++]='U';
+	auxBuffTx[indiceAux++]='N';
+	auxBuffTx[indiceAux++]='E';
+	auxBuffTx[indiceAux++]='R';
+	auxBuffTx[indiceAux++]=0;
+	auxBuffTx[indiceAux++]=':';
+
+	switch (id) {
+	case ALIVE:
+		auxBuffTx[indiceAux++]=ALIVE;
+		auxBuffTx[indiceAux++]=ACK;
+		auxBuffTx[NBYTES]=0x03;
+		break;
+//	case IR_SENSOR:
+//		auxBuffTx[indiceAux++]=IR_SENSOR;
+//		auxBuffTx[NBYTES]=0x12; //decimal= 18
+//
+//		//myWord.ui32 = ir.sensor1[ir.count];
+//		myWord.ui32 = ir.promS0;
+//		auxBuffTx[indiceAux++] = myWord.ui8[0];
+//		auxBuffTx[indiceAux++] = myWord.ui8[1];
+//		break;
+
+		default:
+			auxBuffTx[indiceAux++]=0xDD;
+			auxBuffTx[NBYTES]=0x02;
+			break;
+	}
+	cheksum=0;
+	for(uint8_t a=0 ;a < indiceAux ;a++)
+	{
+		cheksum ^= auxBuffTx[a];
+		datosComProtocol.bufferTx[datosComProtocol.indexWriteTx++]=auxBuffTx[a];
+	}
+		datosComProtocol.bufferTx[datosComProtocol.indexWriteTx++]=cheksum;
+}
 /* USER CODE END 0 */
 
 /**
@@ -89,7 +326,19 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_TIM1_Init();
+  MX_USART1_UART_Init();
+  MX_USB_PCD_Init();
+  MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
+  CDC_AttachRxData(USBReceive);
+  HAL_UART_Receive_IT(&huart1, &datosComProtocol.bufferRx[datosComProtocol.indexWriteRx], 1);
+
+
+  datosComProtocol.indexWriteRx = 0;		//Init indice recepión del Buffer de Recepción
+  datosComProtocol.indexReadRx = 0;			//Init indice de lectura del Buffer de Recepción
+  datosComProtocol.indexWriteTx = 0;
+  datosComProtocol.indexReadTx = 0;
+
 
   /* USER CODE END 2 */
 
@@ -101,6 +350,15 @@ int main(void)
 	  HAL_GPIO_TogglePin(LED_STATUS_GPIO_Port, LED_STATUS_Pin);
 	  HAL_Delay(1000);
 
+	  if(datosComProtocol.indexReadRx != datosComProtocol.indexWriteRx){
+	  		  decodeProtocol(&datosComProtocol);
+	  }
+
+	  if(datosComProtocol.indexReadTx != datosComProtocol.indexWriteTx){
+		  lengthTx = datosComProtocol.indexWriteTx - datosComProtocol.indexReadTx;
+		  if((CDC_Transmit_FS(&datosComProtocol.bufferTx[datosComProtocol.indexReadTx], lengthTx) == USBD_OK))
+			  datosComProtocol.indexReadTx++;
+	  }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -116,6 +374,7 @@ void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+  RCC_PeriphCLKInitTypeDef PeriphClkInit = {0};
 
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
@@ -142,6 +401,12 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  PeriphClkInit.PeriphClockSelection = RCC_PERIPHCLK_USB;
+  PeriphClkInit.UsbClockSelection = RCC_USBCLKSOURCE_PLL_DIV1_5;
+  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInit) != HAL_OK)
   {
     Error_Handler();
   }
@@ -203,6 +468,70 @@ static void MX_TIM1_Init(void)
   /* USER CODE BEGIN TIM1_Init 2 */
 
   /* USER CODE END TIM1_Init 2 */
+
+}
+
+/**
+  * @brief USART1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART1_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART1_Init 0 */
+
+  /* USER CODE END USART1_Init 0 */
+
+  /* USER CODE BEGIN USART1_Init 1 */
+
+  /* USER CODE END USART1_Init 1 */
+  huart1.Instance = USART1;
+  huart1.Init.BaudRate = 115200;
+  huart1.Init.WordLength = UART_WORDLENGTH_8B;
+  huart1.Init.StopBits = UART_STOPBITS_1;
+  huart1.Init.Parity = UART_PARITY_NONE;
+  huart1.Init.Mode = UART_MODE_TX_RX;
+  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART1_Init 2 */
+
+  /* USER CODE END USART1_Init 2 */
+
+}
+
+/**
+  * @brief USB Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USB_PCD_Init(void)
+{
+
+  /* USER CODE BEGIN USB_Init 0 */
+
+  /* USER CODE END USB_Init 0 */
+
+  /* USER CODE BEGIN USB_Init 1 */
+
+  /* USER CODE END USB_Init 1 */
+  hpcd_USB_FS.Instance = USB;
+  hpcd_USB_FS.Init.dev_endpoints = 8;
+  hpcd_USB_FS.Init.speed = PCD_SPEED_FULL;
+  hpcd_USB_FS.Init.low_power_enable = DISABLE;
+  hpcd_USB_FS.Init.lpm_enable = DISABLE;
+  hpcd_USB_FS.Init.battery_charging_enable = DISABLE;
+  if (HAL_PCD_Init(&hpcd_USB_FS) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USB_Init 2 */
+
+  /* USER CODE END USB_Init 2 */
 
 }
 

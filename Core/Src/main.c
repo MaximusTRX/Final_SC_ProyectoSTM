@@ -70,6 +70,7 @@ typedef union {
 }_udat;
 
 _udat myWord;
+_udat prueba;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/

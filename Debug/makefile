@@ -60,8 +60,8 @@ all: main-build
 main-build: Final_Sistemas_Control.elf secondary-outputs
 
 # Tool invocations
-Final_Sistemas_Control.elf Final_Sistemas_Control.map: $(OBJS) $(USER_OBJS) D:\Facultad\Sistemas_Control\ProyectoSTM\STM32F103C8TX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "Final_Sistemas_Control.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m3 -T"D:\Facultad\Sistemas_Control\ProyectoSTM\STM32F103C8TX_FLASH.ld" --specs=nosys.specs -Wl,-Map="Final_Sistemas_Control.map" -Wl,--gc-sections -static --specs=nano.specs -mfloat-abi=soft -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+Final_Sistemas_Control.elf Final_Sistemas_Control.map: $(OBJS) $(USER_OBJS) C:\Users\sofia\Documents\GitHub\Final_SC_ProyectoSTM\STM32F103C8TX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "Final_Sistemas_Control.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m3 -T"C:\Users\sofia\Documents\GitHub\Final_SC_ProyectoSTM\STM32F103C8TX_FLASH.ld" --specs=nosys.specs -Wl,-Map="Final_Sistemas_Control.map" -Wl,--gc-sections -static --specs=nano.specs -mfloat-abi=soft -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 

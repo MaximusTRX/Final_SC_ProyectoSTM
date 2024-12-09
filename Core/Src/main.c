@@ -121,6 +121,7 @@ void USBReceive(uint8_t *buf, uint16_t len){
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim1){
 		if(htim1->Instance == TIM1){
 			uint32_t captured_value = HAL_TIM_ReadCapturedValue(htim1, TIM_CHANNEL_1);
+			__HAL_TIM_GET_COUNTER(htim1); //Devuelve un valor de 16-bit or 32-bit
 		}
 }
 
@@ -329,7 +330,6 @@ int main(void)
   MX_TIM1_Init();
   MX_USART1_UART_Init();
   MX_USB_PCD_Init();
-  MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
   CDC_AttachRxData(USBReceive);
   HAL_UART_Receive_IT(&huart1, &datosComProtocol.bufferRx[datosComProtocol.indexWriteRx], 1);
@@ -433,9 +433,9 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 1 */
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 0;
+  htim1.Init.Prescaler = 8;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 65535;
+  htim1.Init.Period = 3;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
   htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
